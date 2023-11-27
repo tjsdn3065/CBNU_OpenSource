@@ -8,7 +8,6 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool
-import matplotlib.pyplot as plt
 
 class PIDController:
     def __init__(self, kp, ki, kd):
@@ -44,15 +43,13 @@ class CameraNode:
 
         self.obstacle_sub = rospy.Subscriber("obstacle", Bool, self.obstacle_callback)
         self.obstacle_detected = False
-        self.lane_detection_flag = 2
+        self.lane_detection_flag = 2 # 차선 감지 플레그
         self.rotating = False  # 라이다 제어 실행 중인지 여부를 나타내는 플래그
         self.obstacle_count=0 # 장애물이 연속적으로 감지된 횟수
-        self.variable = 2
+        self.not_detection_flag = 0 # 차선을 찾지 못한 플레그
 
     def image_callback(self, img_msg):
-        rospy.loginfo(self.lane_detection_flag)
         if self.obstacle_detected==False:
-            #rospy.loginfo("No obstacle_detected")
             cv_image = self.bridge.imgmsg_to_cv2(img_msg, "bgr8")
             frame = self.hsvExtraction(cv_image)
             height, width = frame.shape[:2]
@@ -60,23 +57,22 @@ class CameraNode:
 
             warp_img = self.perspective_transform(temp)
             lane_center = self.findpoint(warp_img)
-            if self.variable==111 or self.variable==222:
-                self.go()
+            if self.not_detection_flag==111 or self.not_detection_flag==222 or self.not_detection_flag == 0:
+                rospy.loginfo(self.not_detection_flag)
+                self.go_straight()
             else:
+                rospy.loginfo(self.lane_detection_flag)
                 self.follow_line(lane_center)
-        else:
-            #rospy.loginfo("Obstacle_detected")
-            pass
-    def go(self):
+
+    def go_straight(self):
         # cmd_vel 메시지 생성 및 발행
         twist = Twist()
-        twist.linear.x = 0.07  # 일정한 속도로 전진
-        twist.angular.z = 0.0  # PID 출력을 기반으로 회전
+        twist.linear.x = 0.1 # 일정한 속도로 전진
+        twist.angular.z = 0.0
         self.cmd_vel_pub.publish(twist)
 
     def obstacle_callback(self, msg):
         self.obstacle_detected = msg.data
-
         if self.obstacle_detected:
             self.obstacle_count += 1
             if self.obstacle_count >= 3 and not self.rotating:  # 라이다 제어 시작
@@ -91,7 +87,7 @@ class CameraNode:
     def rotate_and_drive(self):
         # 로봇을 회전하며 직진
         twist = Twist()
-        twist.linear.x = 0.07  # 전진 속도
+        twist.linear.x = 0.1  # 전진 속도
         if self.lane_detection_flag==1:
             twist.angular.z = -1.4
         elif self.lane_detection_flag==2:
@@ -106,22 +102,17 @@ class CameraNode:
             self.lane_detection_flag=1
 
     def follow_line(self,lane_center):
-        img_center = 360
-        error = img_center - lane_center
-
+        error = 360 - lane_center
         # PID 제어
         if self.lane_detection_flag==1:
             pid_output = self.pid_controller.left_compute(error)
         else:
             pid_output = self.pid_controller.right_compute(error)
-
         # cmd_vel 메시지 생성 및 발행
         twist = Twist()
-        twist.linear.x = 0.07  # 일정한 속도로 전진
+        twist.linear.x = 0.1  # 일정한 속도로 전진
         twist.angular.z = pid_output  # PID 출력을 기반으로 회전
-        #rospy.loginfo(twist.angular.z)
         self.cmd_vel_pub.publish(twist)
-
 
     def findpoint(self,warp_img):
         histogram = np.sum(warp_img[int(warp_img.shape[0] / 2):, :], axis=0)
@@ -173,29 +164,25 @@ class CameraNode:
         if self.lane_detection_flag == 1 and len(win_left_lane) == 0:
             # 왼쪽 차선 감지 실패 시 직진
             lane_center = 360
-            self.variable = 111
+            self.not_detection_flag = 111
         elif self.lane_detection_flag == 2 and len(win_right_lane) == 0:
             # 오른쪽 차선 감지 실패 시 직진
             lane_center = 360
-            self.variable = 222
+            self.not_detection_flag = 222
         elif self.lane_detection_flag == 1:
             # 왼쪽 차선 감지
             leftx = nonzerox[win_left_lane]
             lane_center = leftx[0] + line_diff / 2 -30
-            self.variable = 1
+            self.not_detection_flag = 1
         elif self.lane_detection_flag == 2:
             # 오른쪽 차선 감지
             rightx = nonzerox[win_right_lane]
             lane_center = rightx[0] - line_diff/2 +10
-            self.variable = 2
+            self.not_detection_flag = 2
         else:
             # 차선 감지 없음
             lane_center = 360
-            self.variable = 0
-
-        # 플래그 값 출력 또는 로깅
-        #rospy.loginfo(f"Lane Detection Flag: {self.lane_detection_flag}")
-        #os.system('clear')
+            self.not_detection_flag = 0
 
         return lane_center
 
