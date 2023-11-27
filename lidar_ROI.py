@@ -14,7 +14,7 @@ class LidarNode:
         self.obstacle_pub = rospy.Publisher("obstacle", Bool, queue_size=1)
 
     def lidar_callback(self, data):
-        # 관심 영역 설정 (0도에서 30도 및 330도에서 360도)
+        # 관심 영역 설정 (0도에서 10도 및 350도에서 360도)
         start_angle_1 = 0
         end_angle_1 = 10
         start_angle_2 = 350
